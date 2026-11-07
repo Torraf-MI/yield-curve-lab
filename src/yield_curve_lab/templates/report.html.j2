@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rischio tasso e spread – {{ cliente }}</title>
+{% if plotly_inline %}<script>{{ plotly_inline | safe }}</script>{% else %}<script src="{{ plotly_cdn }}"></script>{% endif %}
+<style>
+  :root { --blu: #1f4e79; --grigio: #595959; --chiaro: #f2f5f9; }
+  body { font-family: "Segoe UI", Helvetica, Arial, sans-serif; color: #222; max-width: 1000px;
+         margin: 0 auto; padding: 32px 16px 60px; line-height: 1.5; background: #fff; }
+  header { border-bottom: 3px solid var(--blu); padding-bottom: 12px; margin-bottom: 24px; }
+  h1 { color: var(--blu); margin: 0 0 4px; font-size: 1.7rem; }
+  h2 { color: var(--blu); font-size: 1.2rem; margin-top: 38px; border-bottom: 1px solid #ddd; padding-bottom: 4px; }
+  h3 { font-size: 1rem; margin: 22px 0 6px; }
+  .sub { color: var(--grigio); font-size: .92rem; }
+  .kpi { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+  .kpi div { background: var(--chiaro); border-radius: 8px; padding: 12px 14px; }
+  .kpi b { display: block; font-size: 1.4rem; color: var(--blu); }
+  .kpi span { font-size: .78rem; color: var(--grigio); text-transform: uppercase; letter-spacing: .03em; }
+  .kpi small { display: block; font-size: .8rem; color: var(--grigio); }
+  .esito { border-left: 5px solid #fab219; background: #fff8e8; padding: 12px 16px; border-radius: 4px; margin: 16px 0; }
+  table { width: 100%; border-collapse: collapse; font-size: .88rem; margin: 10px 0; }
+  th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #e5e5e5; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: var(--blu); color: #fff; font-weight: 600; }
+  tr:nth-child(even) td { background: #fafbfc; }
+  td.neg { color: #c0392b; } td.pos { color: #1e7d32; }
+  td small { color: var(--grigio); display: block; font-size: .78rem; }
+  .scroll { overflow-x: auto; }
+  .scroll table { white-space: nowrap; }
+  .grafico { margin: 14px 0; overflow: hidden; }
+  .note { font-size: .8rem; color: var(--grigio); background: var(--chiaro); padding: 12px 14px; border-radius: 6px; }
+  ul { padding-left: 20px; }
+  @media print { .grafico { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Rischio tasso e spread del portafoglio obbligazionario</h1>
+  <div class="sub">Preparato per <b>{{ cliente }}</b> · prezzi al {{ valutazione }} · report del {{ oggi }}</div>
+</header>
+
+<h2>Sintesi</h2>
+<div class="kpi">
+  {% for label, value, n in kpi %}<div><span>{{ label }}</span><b>{{ value }}</b><small>{{ n }}</small></div>{% endfor %}
+</div>
+<div class="esito">Il portafoglio perde circa <b>{{ kpi[3][1] }}</b> per ogni punto base di rialzo dei tassi, e il
+{{ quota_spread }} di questa sensibilità è anche esposizione allo <b>spread BTP-Bund</b>: i due rischi si sommano
+nelle crisi del debito. Il periodo storico peggiore per questo portafoglio ({{ peggiore_periodo }})
+costerebbe oggi <b>{{ stress[-1].pnl }}</b>. Una copertura con Bund annulla il rischio tasso ma non quello di
+spread{% if crisi_peggio %}, e nella crisi del 2011 avrebbe fatto perdere di più, non di meno{% endif %}.</div>
+<div class="scroll">
+<table>
+  <tr><th>Titolo</th><th>Nominale</th><th>Prezzo</th><th>Rendimento</th><th>Controvalore</th><th>Peso</th><th>Duration mod.</th><th>Convessità</th><th>DV01</th><th>Ricco/caro (pb)</th></tr>
+  {% for r in posizioni %}<tr><td>{{ r.titolo }}</td><td>{{ r.nominale }}</td><td>{{ r.prezzo }}</td><td>{{ r.rend }}</td><td>{{ r.cv }}</td><td>{{ r.peso }}</td><td>{{ r.dur }}</td><td>{{ r.conv }}</td><td>{{ r.dv01 }}</td><td>{{ r.rc }}</td></tr>{% endfor %}
+</table>
+</div>
+<p class="sub">Prezzi teorici sulla curva stimata, per 100 di nominale; il controvalore include il rateo. Rendimento a
+scadenza con capitalizzazione semestrale per i BTP e annuale per i Bund. <b>Ricco/caro</b>: rendimento di mercato meno
+rendimento della curva; positivo vuol dire che il titolo rende più dei suoi vicini.</p>
+
+<h2>Le curve dei tassi</h2>
+<p>Le curve si stimano sui prezzi dei titoli quotati con il modello di <b>Svensson</b>, lo stesso che usano la
+Bundesbank e la BCE: tre parametri danno livello, pendenza e una gobba, altri tre una seconda gobba e la posizione delle
+due. La stima minimizza gli errori di prezzo pesati con l'inverso della duration, cioè in pratica gli errori di
+rendimento, e si ripete in due passi: i titoli molto lontani dalla prima curva pesano poco nella seconda, così pochi
+titoli anomali non la deformano.</p>
+<div class="grafico">{{ grafici.curve | safe }}</div>
+<div class="scroll">
+<table>
+  <tr><th>Curva</th><th>Titoli</th><th>Zero 2a</th><th>Zero 10a</th><th>Zero 30a</th><th>Errore Svensson</th><th>Errore Nelson-Siegel</th><th>Titoli anomali</th></tr>
+  {% for c in curve %}<tr><td>{{ c.em }}</td><td>{{ c.n }}</td><td>{{ c.z2 }}</td><td>{{ c.z10 }}</td><td>{{ c.z30 }}</td><td>{{ c.rmse }} pb</td><td>{{ c.rmse_ns }} pb</td><td style="white-space:normal">{{ c.anomali | join("; ") or "nessuno" }}</td></tr>{% endfor %}
+</table>
+</div>
+<p class="sub">Errore: scarto quadratico medio dei rendimenti dalla curva, per Svensson esclusi i titoli anomali.
+Nelson-Siegel ha una gobba sola e non riesce a seguire insieme la parte breve e quella lunga della curva BTP. Lo spread
+BTP-Bund a 10 anni sui tassi zero è di {{ spread_oggi }} punti base.</p>
+
+<h3>Titoli ricchi e a sconto</h3>
+<p>Lo scarto di ciascun titolo dalla curva misura il suo valore relativo. Un BTP che rende 10 punti base più dei vicini
+può essere un'occasione di acquisto o un titolo poco liquido; uno che rende meno, spesso una vecchia emissione con
+cedola bassa che piace a chi vuole minusvalenze da compensare, o un titolo consegnabile nei future.</p>
+<div class="grafico">{{ grafici.ricco_caro | safe }}</div>
+
+<h2>Come si muovono le curve</h2>
+<p>Dal 2008 a oggi il debito italiano ha attraversato la crisi finanziaria, quella del debito sovrano (spread oltre 500
+punti base a fine 2011), gli anni dei tassi negativi, la crisi politica del 2018, la pandemia e il rialzo più rapido
+della storia della BCE.</p>
+<div class="grafico">{{ grafici.storia | safe }}</div>
+<p>L'<b>analisi delle componenti principali</b> sulle variazioni mensili ritrova i tre fattori classici di Litterman e
+Scheinkman: <b>livello</b>, <b>pendenza</b> e <b>curvatura</b>. Sulla curva BTP spiegano il {{ pca_btp[0] }}, il
+{{ pca_btp[1] }} e il {{ pca_btp[2] }} della varianza; sul Bund il livello pesa meno ({{ pca_bund[0] }}) perché gli
+manca lo spread, che si muove quasi in blocco ({{ pca_spread }} dal primo fattore). Per un portafoglio di BTP quindi il
+rischio è soprattutto di livello, e una parte importante del livello è spread.</p>
+<div class="grafico">{{ grafici.pca | safe }}</div>
+
+<h2>Dove sta il rischio</h2>
+<p>La duration riassume il rischio in un numero ma presume che tutti i tassi si muovano insieme. Le <b>key rate
+duration</b> scompongono il DV01 sui nodi della curva: ciascuna misura la perdita per un rialzo di un punto base
+concentrato su un nodo e che si annulla sui nodi vicini. Sommano al DV01 totale e dicono quali scadenze contano.</p>
+<div class="grafico">{{ grafici.krd | safe }}</div>
+
+<h3>Scenari di stress</h3>
+<p>Ogni scenario sposta le curve Bund e BTP e il portafoglio viene <b>rivalutato titolo per titolo</b>. Il confronto con
+le due approssimazioni mostra i loro limiti: duration e convessità sbagliano quando la curva non si sposta in parallelo,
+le key rate duration colgono la forma ma sono lineari e sottostimano il guadagno di convessità negli shock ampi.</p>
+<div class="grafico">{{ grafici.stress | safe }}</div>
+<div class="scroll">
+<table>
+  <tr><th>Scenario</th><th>Utile/perdita</th><th>%</th><th>Duration e convessità</th><th>Key rate duration</th></tr>
+  {% for r in stress %}<tr><td>{{ r.nome }}<small>{{ r.descr }}</small></td><td class="{{ r.segno }}">{{ r.pnl }}</td><td>{{ r.pct }}</td><td>{{ r.dc }}</td><td>{{ r.krd }}</td></tr>{% endfor %}
+</table>
+</div>
+
+<h3>VaR con simulazione storica</h3>
+<p>Il VaR storico applica al portafoglio di oggi, nodo per nodo, le variazioni delle curve di ciascuno dei {{ n_mesi }}
+mesi dal 2008 e lo rivaluta per intero: niente ipotesi di normalità, e le correlazioni tra tassi e spread sono quelle
+osservate. Con il {{ lv }} di confidenza la perdita mensile non supera <b>{{ eur(var1.VaR) }}</b>; nei mesi oltre
+quella soglia la media è <b>{{ eur(var1.CVaR) }}</b> (CVaR). Il mese peggiore è {{ peggiore_data }}, con
+{{ eur(var1.Peggiore) }}. Su 12 mesi il VaR sale a {{ eur(var12.VaR) }}: il rialzo del 2022 è durato un anno intero.</p>
+<div class="grafico">{{ grafici.var | safe }}</div>
+
+<h2>Coprire il rischio tasso con i Bund</h2>
+<p>Un gestore che vuole tenere lo spread dei BTP ma non il rischio tasso vende Bund (o i future Schatz, Bobl, Bund e
+Buxl) in quantità tali da annullare le key rate duration. I nominali si scelgono ai minimi quadrati, con il vincolo che
+anche il DV01 totale si annulli:</p>
+<div class="scroll">
+<table>
+  <tr><th>Copertura</th><th>Nominale</th></tr>
+  {% for c in coperture %}<tr><td>{{ c.titolo }}</td><td class="neg">{{ c.nominale }}</td></tr>{% endfor %}
+</table>
+</div>
+<p>Il DV01 residuo è di {{ cop_dv01 }} per punto base. Gli scenari sui tassi diventano quasi neutri, quelli sullo
+spread restano identici. Nelle <b>fughe verso la qualità</b> invece la copertura fa danni: i Bund salgono mentre i BTP
+scendono, e chi è corto di Bund perde su entrambe le gambe. Per questo il VaR mensile con la copertura scende appena,
+da {{ eur(var1.VaR) }} a {{ var_coperto }}: nel campione il rischio tasso e quello di spread si sono in parte
+compensati.</p>
+<div class="grafico">{{ grafici.copertura | safe }}</div>
+<div class="scroll">
+<table>
+  <tr><th>Scenario</th><th>Senza copertura</th><th>Con copertura</th></tr>
+  {% for r in stress %}<tr><td>{{ r.nome }}</td><td class="{{ r.segno }}">{{ r.pnl }}</td><td class="{{ r.segno_dopo }}">{{ r.dopo }}</td></tr>{% endfor %}
+</table>
+</div>
+
+{% if imm %}
+<h2>Immunizzare un obiettivo: {{ imm.descr }}</h2>
+<p>Il cliente deve disporre di <b>{{ imm.importo }}</b> il {{ imm.data }}. Oggi quell'impegno vale {{ imm.valore }}
+(scontato sulla curva BTP) e ha una duration di {{ imm.dur_l }} anni. Secondo Redington lo si copre con titoli che
+hanno <b>lo stesso valore attuale e la stessa duration</b>, e una convessità maggiore: allora qualunque spostamento
+parallelo dei tassi lascia un surplus. Con due BTP, uno che scade prima e uno dopo l'obiettivo:</p>
+<div class="scroll">
+<table>
+  <tr><th>Titolo</th><th>Nominale</th><th>Controvalore</th></tr>
+  {% for p in imm.posizioni %}<tr><td>{{ p.titolo }}</td><td>{{ p.nominale }}</td><td>{{ p.valore }}</td></tr>{% endfor %}
+</table>
+</div>
+<p class="sub">Duration del portafoglio {{ imm.dur_p }} anni contro {{ imm.dur_l }} dell'obiettivo; convessità
+{{ imm.conv_p }} contro {{ imm.conv_l }}.</p>
+<div class="grafico">{{ grafici.immunizzazione | safe }}</div>
+<p>Il grafico confronta la soluzione immunizzata con tre scelte che un risparmiatore farebbe d'istinto, tutte con lo
+stesso capitale iniziale. Il titolo con <b>scadenza vicina</b> all'obiettivo sembra la scelta naturale, ma le cedole
+abbassano la sua duration e un calo dei tassi lo lascia scoperto (le cedole si reinvestono a meno). Il titolo
+<b>breve</b> da rinnovare espone al rischio di reinvestimento, quello <b>lungo</b> al rischio di prezzo alla data
+dell'obiettivo. Con spostamenti fino a 300 punti base il surplus peggiore della soluzione immunizzata è
+{{ imm.peggiore_imm }}, quello delle alternative {{ imm.peggiore_alt }}.</p>
+<p>L'immunizzazione protegge dagli spostamenti paralleli, non dalle torsioni della curva: con due titoli ai lati
+dell'obiettivo un irripidimento fa perdere un po'. Va quindi ribilanciata nel tempo, man mano che la duration dei titoli
+e quella dell'obiettivo si allontanano.</p>
+<div class="scroll">
+<table>
+  <tr><th>Surplus dopo lo shock</th>{% for c in imm.colonne %}<th style="white-space:normal">{{ c }}</th>{% endfor %}</tr>
+  {% for r in imm.righe %}<tr><td>{{ r.nome }}</td>{% for v in r.valori %}<td class="{{ r.segni[loop.index0] }}">{{ v }}</td>{% endfor %}</tr>{% endfor %}
+</table>
+</div>
+{% endif %}
+
+<h2>Metodologia</h2>
+<ul class="sub">
+  <li><b>Titoli</b>: calendario delle cedole ricostruito dalla scadenza, rateo ACT/ACT (ICMA), tempi dei flussi ACT/365,
+    regolamento alla data di valutazione.</li>
+  <li><b>Curve</b>: Nelson-Siegel (1987) e Svensson (1994) sui tassi zero a capitalizzazione continua, stimate con
+    minimi quadrati non lineari (trust region con vincoli) da più punti iniziali sui parametri τ.</li>
+  <li><b>Key rate duration</b>: shock triangolari di ±1 pb sui nodi 1, 2, 3, 5, 7, 10, 15, 20 e 30 anni
+    (Ho, 1992), costanti prima del primo nodo e dopo l'ultimo, quindi la somma è uno shock parallelo.</li>
+  <li><b>PCA</b>: autovettori della covarianza delle variazioni mensili dei tassi zero su dieci nodi.</li>
+  <li><b>VaR storico</b>: variazioni mensili (e su 12 mesi, sovrapposte) di ciascun nodo, interpolate linearmente e
+    applicate alle curve di oggi; rivalutazione completa.</li>
+  <li><b>Immunizzazione</b>: valore, duration e convessità effettive (rivalutazione con ±10 pb) di titoli e obiettivo.</li>
+</ul>
+{% if nota %}<p class="note">{{ nota }}</p>{% endif %}
+<p class="note">Documento a scopo illustrativo: le stime si basano su dati passati e su modelli, non costituiscono una
+previsione né una raccomandazione. Il report non considera imposte, costi di transazione, liquidità dei titoli né il
+rischio di credito oltre a quello di spread.</p>
+</body>
+</html>

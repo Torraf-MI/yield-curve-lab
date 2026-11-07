@@ -1,0 +1,18 @@
+{
+  "cliente": "Famiglia Bianchi",
+  "valutazione": "2026-10-30",
+  "titoli": "../data/titoli_esempio.csv",
+  "storia": "../data/storia_curve.csv",
+  "portafoglio": [
+    {"codice": "BTP-2027-08", "nominale": 60000},
+    {"codice": "BTP-2030-02", "nominale": 80000},
+    {"codice": "BTP-2032-06", "nominale": 100000},
+    {"codice": "BTP-2036-03", "nominale": 70000},
+    {"codice": "BTP-2042-09", "nominale": 50000},
+    {"codice": "BTP-2048-09", "nominale": 40000},
+    {"codice": "BUND-2035-02", "nominale": 60000}
+  ],
+  "coperture": ["BUND-2028-02", "BUND-2031-08", "BUND-2034-02", "BUND-2036-02", "BUND-2044-07", "BUND-2053-08"],
+  "obiettivo": {"descrizione": "Acquisto della casa", "importo": 300000, "data": "2032-06-30"},
+  "livello_var": 0.99
+}
